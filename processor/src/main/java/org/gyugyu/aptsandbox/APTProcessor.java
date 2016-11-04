@@ -7,6 +7,7 @@ import com.google.auto.service.AutoService;
 import com.google.common.base.Function;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
+import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.TypeName;
@@ -111,7 +112,7 @@ public class APTProcessor extends AbstractProcessor {
         TypeMirror bean = (TypeMirror) annotationValue.getValue();
         TypeName beanName = TypeName.get(bean);
 
-        final String className = String.format("%sIntentBuilder", element.getSimpleName());
+        String className = String.format("%sIntentBuilder", element.getSimpleName());
         TypeSpec.Builder builder = TypeSpec.classBuilder(className)
                 .addSuperinterface(TestInterface.class)
                 .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
@@ -121,6 +122,7 @@ public class APTProcessor extends AbstractProcessor {
 
         List<ExecutableElement> constructors = new ArrayList<>();
         List<ExecutableElement> getters = new ArrayList<>();
+        List<ExecutableElement> setters = new ArrayList<>();
         for (Element e : ((TypeElement) typeUtil.asElement(bean)).getEnclosedElements()) {
             if (e instanceof ExecutableElement) {
                 if (e.getKind() == ElementKind.CONSTRUCTOR) {
@@ -128,6 +130,9 @@ public class APTProcessor extends AbstractProcessor {
                 }
                 if (e.getSimpleName().toString().indexOf("get") == 0) {
                     getters.add((ExecutableElement) e);
+                }
+                if (e.getSimpleName().toString().indexOf("set") == 0) {
+                    setters.add((ExecutableElement) e);
                 }
             }
         }
@@ -164,16 +169,33 @@ public class APTProcessor extends AbstractProcessor {
                 .addStatement("return this");
         builder.addMethod(fooMethod.build());
 
+        for (ExecutableElement setter : setters) {
+            Name name = setter.getSimpleName();
+            MethodSpec.Builder adderMethod = MethodSpec.methodBuilder(name.toString())
+                    .addModifiers(Modifier.PUBLIC)
+                    .returns(ClassName.get(getPackageName(element), className));
+
+            for (VariableElement parameter : setter.getParameters()) {
+                adderMethod.addParameter(TypeName.get(parameter.asType()), parameter.getSimpleName().toString())
+                    .addStatement("bean.$N($N)", name, parameter.getSimpleName());
+            }
+
+            adderMethod.addStatement("return this");
+            builder.addMethod(adderMethod.build());
+        }
+
         MethodSpec.Builder buildMethod = MethodSpec.methodBuilder("build")
                 .addModifiers(Modifier.PUBLIC)
                 .returns(Intent.class);
 
         for (ExecutableElement getter : getters) {
             Extra extra = getter.getAnnotation(Extra.class);
-            Name name = getter.getSimpleName();
-            buildMethod.beginControlFlow("if (bean.$N() != null)", name)
-                    .addStatement("intent.putExtra($S, bean.$N())", extra.value(), getter.getSimpleName())
-                    .endControlFlow();
+            if (extra != null) {
+                Name name = getter.getSimpleName();
+                buildMethod.beginControlFlow("if (bean.$N() != null)", name)
+                        .addStatement("intent.putExtra($S, bean.$N())", extra.value(), getter.getSimpleName())
+                        .endControlFlow();
+            }
         }
 
         buildMethod.addStatement("return intent");

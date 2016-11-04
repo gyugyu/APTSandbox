@@ -11,6 +11,10 @@ public class TestBean {
         this.arg2 = arg2;
     }
 
+    public void setArg2(int arg2) {
+        this.arg2 = arg2;
+    }
+
     @Extra(TEST_NAME)
     public String getArg1() {
         return arg1;
